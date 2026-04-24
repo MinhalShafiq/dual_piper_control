@@ -58,23 +58,31 @@ class DualPiperController:
         self.slave.ConnectPort()
         print(f"  Slave connected.")
 
+        # Wait for CAN bus to start receiving feedback data
+        print("  Waiting for CAN feedback...")
+        time.sleep(2)
+
     def _wait_enable(self, piper, name):
         """Wait for all motors to report enabled status."""
         print(f"  Enabling {name}...")
+        # Send initial enable command
+        piper.EnableArm(ENABLE_MOTORS)
+        piper.GripperCtrl(0, GRIPPER_EFFORT, GRIPPER_CODE, 0)
+        time.sleep(0.5)
+
         start = time.time()
         while time.time() - start < ENABLE_TIMEOUT:
-            info = piper.GetArmLowSpdInfoMsgs()
-            enabled = (
-                info.motor_1.foc_status.driver_enable_status and
-                info.motor_2.foc_status.driver_enable_status and
-                info.motor_3.foc_status.driver_enable_status and
-                info.motor_4.foc_status.driver_enable_status and
-                info.motor_5.foc_status.driver_enable_status and
-                info.motor_6.foc_status.driver_enable_status
-            )
-            if enabled:
+            enable_list = []
+            enable_list.append(piper.GetArmLowSpdInfoMsgs().motor_1.foc_status.driver_enable_status)
+            enable_list.append(piper.GetArmLowSpdInfoMsgs().motor_2.foc_status.driver_enable_status)
+            enable_list.append(piper.GetArmLowSpdInfoMsgs().motor_3.foc_status.driver_enable_status)
+            enable_list.append(piper.GetArmLowSpdInfoMsgs().motor_4.foc_status.driver_enable_status)
+            enable_list.append(piper.GetArmLowSpdInfoMsgs().motor_5.foc_status.driver_enable_status)
+            enable_list.append(piper.GetArmLowSpdInfoMsgs().motor_6.foc_status.driver_enable_status)
+            if all(enable_list):
                 print(f"  {name} enabled.")
                 return True
+            print(f"  {name} enable status: {enable_list}")
             piper.EnableArm(ENABLE_MOTORS)
             piper.GripperCtrl(0, GRIPPER_EFFORT, GRIPPER_CODE, 0)
             time.sleep(0.5)
@@ -245,6 +253,8 @@ class DualPiperController:
 
     def stop(self):
         """Stop mirroring and disable arms safely."""
+        if not self.running and not self.master and not self.slave:
+            return
         self.running = False
         print("\n\n=== STOPPING ===")
 
@@ -262,7 +272,7 @@ class DualPiperController:
             except Exception as e:
                 print(f"  Warning: {e}")
 
-        print("Arms disabled. Done.")
+        print("Arms disabled.")
 
     def disconnect(self):
         """Disconnect from both arms."""
@@ -271,11 +281,13 @@ class DualPiperController:
                 self.master.DisconnectPort()
             except Exception:
                 pass
+            self.master = None
         if self.slave:
             try:
                 self.slave.DisconnectPort()
             except Exception:
                 pass
+            self.slave = None
 
 
 def main():
@@ -306,6 +318,7 @@ def main():
         controller.connect()
         if not controller.reset_arms():
             print("Failed to reset arms. Exiting.")
+            controller.stop()
             controller.disconnect()
             sys.exit(1)
         controller.start_mirroring()
