@@ -98,56 +98,68 @@ def reset_single_arm(can_port, name):
     piper.ConnectPort()
     time.sleep(2)
 
-    # Enable
+    # Enable (matching the working demo pattern: EnableArm -> loop check)
     if not enable_arm(piper, name):
         print(f"  Failed to enable {name}. Disconnecting.")
         piper.DisconnectPort()
         return False
 
-    # Set CAN + joint control mode
+    # Set CAN + joint control mode and wait for it to take effect
     print(f"  Setting {name} to CAN joint control mode...")
-    piper.MotionCtrl_2(CAN_CTRL_MODE, JOINT_CTRL_MODE, RESET_SPEED, VEL_MODE)
-    time.sleep(0.5)
+    start = time.time()
+    while time.time() - start < ENABLE_TIMEOUT:
+        piper.MotionCtrl_2(CAN_CTRL_MODE, JOINT_CTRL_MODE, RESET_SPEED, VEL_MODE)
+        time.sleep(0.5)
+        ctrl_mode = piper.GetArmStatus().arm_status.ctrl_mode
+        print(f"  {name} ctrl_mode: {ctrl_mode}")
+        if ctrl_mode == CAN_CTRL_MODE:
+            break
+    print(f"  {name} in CAN control mode.")
 
-    # Move to home
+    # Move to home - send EnableArm + MotionCtrl_2 + JointCtrl every iteration
+    # (matching the working piper_joint_ctrl.py demo pattern)
     print(f"  Moving {name} to zero position...")
+    print_joint_positions(piper, name)
     start = time.time()
     settled_count = 0
 
     while time.time() - start < RESET_TIMEOUT:
+        piper.EnableArm(ENABLE_MOTORS)
         piper.MotionCtrl_2(CAN_CTRL_MODE, JOINT_CTRL_MODE, RESET_SPEED, VEL_MODE)
         piper.JointCtrl(*HOME_POSITION)
         piper.GripperCtrl(0, GRIPPER_EFFORT, GRIPPER_CODE, 0)
-        time.sleep(0.1)
+        time.sleep(0.005)
 
         motion_done = piper.GetArmStatus().arm_status.motion_status == 0
         at_zero = joints_at_zero(piper)
 
         if motion_done and at_zero:
             settled_count += 1
-            if settled_count >= 5:
+            if settled_count >= 10:
                 break
         else:
             settled_count = 0
 
     # Hold at zero to stabilize
     print(f"  Holding {name} at zero to stabilize...")
-    for _ in range(30):
+    for _ in range(200):
+        piper.EnableArm(ENABLE_MOTORS)
         piper.MotionCtrl_2(CAN_CTRL_MODE, JOINT_CTRL_MODE, RESET_SPEED, VEL_MODE)
         piper.JointCtrl(*HOME_POSITION)
         piper.GripperCtrl(0, GRIPPER_EFFORT, GRIPPER_CODE, 0)
-        time.sleep(0.1)
+        time.sleep(0.005)
 
     # Final check
     print_joint_positions(piper, name)
 
     if not joints_at_zero(piper):
         print(f"  WARNING: {name} not exactly at zero. Sending correction...")
-        for _ in range(20):
+        for _ in range(400):
+            piper.EnableArm(ENABLE_MOTORS)
             piper.MotionCtrl_2(CAN_CTRL_MODE, JOINT_CTRL_MODE, 20, VEL_MODE)
             piper.JointCtrl(*HOME_POSITION)
             piper.GripperCtrl(0, GRIPPER_EFFORT, GRIPPER_CODE, 0)
-            time.sleep(0.1)
+            time.sleep(0.005)
         time.sleep(1.0)
         print_joint_positions(piper, name)
 

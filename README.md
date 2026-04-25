@@ -29,53 +29,74 @@ dual_piper_control/
 ## Prerequisites
 
 - Two Piper robotic arms, each connected to its own USB CAN adapter
-- Python 3
+- Python 3 with virtual environment
 - System packages:
   ```bash
   sudo apt install ethtool can-utils
   ```
-- Python packages:
-  ```bash
-  pip install -r requirements.txt
-  ```
+
+## Installation
+
+### 1. Create virtual environment
+
+```bash
+python3 -m venv piper_env
+source piper_env/bin/activate
+```
+
+### 2. Install dependencies
+
+```bash
+pip install -r requirements.txt
+sudo apt update && sudo apt install can-utils ethtool
+```
 
 ## Setup
 
-### 1. Find Your CAN USB Addresses
+### 1. Activate CAN Interfaces
 
-Plug in one CAN adapter at a time and run:
-
-```bash
-sudo ethtool -i can0 | grep bus-info
-```
-
-Note the `bus-info` value (e.g. `1-2:1.0`) for each adapter.
-
-### 2. Configure CAN Interfaces
-
-Edit the `USB_PORTS` section in `setup_can.sh` with your bus-info values:
+Each arm needs its own CAN adapter. Activate them with:
 
 ```bash
-USB_PORTS["1-2:1.0"]="can_left:1000000"
-USB_PORTS["1-3:1.0"]="can_right:1000000"
+# If you have two CAN adapters (can0 and can1 auto-detected):
+sudo ip link set can0 type can bitrate 1000000 && sudo ip link set can0 up
+sudo ip link set can1 type can bitrate 1000000 && sudo ip link set can1 up
 ```
 
-Then run:
+Or use the provided script (edit `USB_PORTS` inside to match your hardware first):
 
 ```bash
 sudo bash setup_can.sh
 ```
 
-### 3. Choose Master and Slave
+To find which USB port maps to which CAN interface:
+
+```bash
+sudo ethtool -i can0 | grep bus-info
+sudo ethtool -i can1 | grep bus-info
+```
+
+Verify both are up:
+
+```bash
+ip -br link show type can
+```
+
+### 2. Choose Master and Slave
 
 Edit the top of `run_dual_piper.sh`:
 
 ```bash
-MASTER="can_left"    # Arm you move by hand
-SLAVE="can_right"    # Arm that follows
+MASTER="can0"    # Arm you move by hand
+SLAVE="can1"     # Arm that follows
 ```
 
-Swap the values to reverse which arm leads.
+Swap the values to reverse which arm leads. The same config is in `reset.sh`:
+
+```bash
+LEFT="can0"
+RIGHT="can1"
+```
 
 ## Usage
 
@@ -98,15 +119,15 @@ bash reset.sh right        # reset right arm only
 Or directly with Python:
 
 ```bash
-python3 reset_arms.py --left can_left --right can_right
-python3 reset_arms.py --left can_left                     # left only
-python3 reset_arms.py --right can_right                   # right only
+python3 reset_arms.py --left can0 --right can1
+python3 reset_arms.py --left can0                # left only
+python3 reset_arms.py --right can1               # right only
 ```
 
 ### Mirror only (arms already at zero)
 
 ```bash
-python3 dual_piper.py --master can_left --slave can_right
+python3 dual_piper.py --master can0 --slave can1
 ```
 
 ### What happens during mirroring
@@ -120,10 +141,16 @@ python3 dual_piper.py --master can_left --slave can_right
 
 ### CAN interfaces not found
 
-Make sure both USB CAN adapters are plugged in, then run `sudo bash setup_can.sh`. Check available interfaces:
+Make sure both USB CAN adapters are plugged in. Check what's available:
 
 ```bash
 ip -br link show type can
+```
+
+If an interface is down, bring it up manually:
+
+```bash
+sudo ip link set can0 type can bitrate 1000000 && sudo ip link set can0 up
 ```
 
 ### Arm fails to enable
@@ -133,9 +160,10 @@ ip -br link show type can
 - Try running `piper_sdk/demo/V2/piper_reset.py` for a single arm to clear errors
 - Check control mode with `piper_sdk/demo/V2/piper_status.py`
 
-### Arm drifts after reset
+### Arm doesn't move to zero during reset
 
-The reset holds the zero position for 3 seconds after reaching it to let the arm stabilize. If drift still occurs, check for mechanical issues.
+- Make sure the arm successfully entered CAN control mode (look for `ctrl_mode: 1` in output)
+- If stuck, press the button on the robot and try `piper_sdk/demo/V2/piper_reset.py` first
 
 ### Slave doesn't follow smoothly
 
