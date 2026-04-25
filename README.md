@@ -55,18 +55,19 @@ sudo apt update && sudo apt install can-utils ethtool
 
 ### 1. Activate CAN Interfaces
 
-Each arm needs its own CAN adapter. Activate them with:
+Each arm needs its own CAN adapter. Activate them using the `can_activate.sh` script from `piper_sdk`, specifying CAN name, bitrate, and USB address:
 
 ```bash
-# If you have two CAN adapters (can0 and can1 auto-detected):
-sudo ip link set can0 type can bitrate 1000000 && sudo ip link set can0 up
-sudo ip link set can1 type can bitrate 1000000 && sudo ip link set can1 up
+# Activate can0 on USB port 1-3:1.0 and can1 on USB port 1-2:1.0
+sudo bash piper_sdk/can_activate.sh can0 1000000 1-3:1.0
+sudo bash piper_sdk/can_activate.sh can1 1000000 1-2:1.0
 ```
 
-Or use the provided script (edit `USB_PORTS` inside to match your hardware first):
+Or manually:
 
 ```bash
-sudo bash setup_can.sh
+sudo ip link set can0 type can bitrate 1000000 && sudo ip link set can0 up
+sudo ip link set can1 type can bitrate 1000000 && sudo ip link set can1 up
 ```
 
 To find which USB port maps to which CAN interface:
