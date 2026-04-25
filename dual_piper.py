@@ -153,11 +153,20 @@ def main():
             loop_count += 1
 
             # Re-send enable + high-follow every 100 iterations (~0.5s)
-            # to prevent slave from losing sync. We do NOT re-send GripperCtrl
-            # here — that would overwrite master's gripper command on 0x159.
+            # to prevent slave from losing sync.
             if loop_count % 100 == 0:
                 piper.MotionCtrl_2(0x01, 0x01, 100, 0xAD)
                 piper.EnableArm(7)
+
+            # Relay master's gripper to slave at ~20Hz. The master/slave CAN
+            # linkage replicates joint frames automatically, but the gripper
+            # module is independently enabled and does NOT auto-follow, so
+            # we read master's gripper command and forward it to slave.
+            if loop_count % 10 == 0:
+                master_grip = piper.GetArmGripperCtrl().gripper_ctrl
+                piper.GripperCtrl(
+                    abs(master_grip.grippers_angle), 1000, 0x01, 0
+                )
 
             # Print status every ~2 seconds
             if loop_count % 400 == 0:
