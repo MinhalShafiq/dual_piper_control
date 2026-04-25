@@ -18,12 +18,64 @@ import signal
 import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from piper_control import piper_interface, piper_init
+from piper_sdk import C_PiperInterface_V2
 
 # Constants
 LOOP_RATE = 0.005           # 200Hz control loop
 JOINT_ZERO_THRESHOLD = 500  # 0.5 degrees in 0.001 deg units
+ENABLE_TIMEOUT = 10.0
+
+
+def is_arm_enabled(piper):
+    msgs = piper.GetArmLowSpdInfoMsgs()
+    return (
+        msgs.motor_1.foc_status.driver_enable_status and
+        msgs.motor_2.foc_status.driver_enable_status and
+        msgs.motor_3.foc_status.driver_enable_status and
+        msgs.motor_4.foc_status.driver_enable_status and
+        msgs.motor_5.foc_status.driver_enable_status and
+        msgs.motor_6.foc_status.driver_enable_status
+    )
+
+
+def disable_arm(piper, timeout=ENABLE_TIMEOUT):
+    start = time.time()
+    while time.time() - start < timeout:
+        piper.MotionCtrl_1(0x02, 0, 0)
+        time.sleep(0.1)
+        status = piper.GetArmStatus().arm_status
+        if status.ctrl_mode == 0 and status.arm_status == 0:
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def enable_arm_can_mode(piper, timeout=ENABLE_TIMEOUT):
+    start = time.time()
+    while time.time() - start < timeout:
+        for motor in range(1, 7):
+            piper.EnableArm(motor)
+        time.sleep(0.1)
+        if is_arm_enabled(piper):
+            piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
+            time.sleep(0.5)
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def full_enable(piper, name, max_attempts=3):
+    for attempt in range(1, max_attempts + 1):
+        print(f"  {name}: enable attempt {attempt}/{max_attempts}...")
+        if not disable_arm(piper):
+            continue
+        if not enable_arm_can_mode(piper):
+            continue
+        if piper.GetArmStatus().arm_status.ctrl_mode == 1:
+            print(f"  {name}: enabled.")
+            return True
+    print(f"  ERROR: {name} failed to enable!")
+    return False
 
 
 class DualPiperController:
@@ -35,19 +87,21 @@ class DualPiperController:
         self.running = False
 
     def connect(self):
-        """Connect to both arms."""
         print(f"Connecting to master arm on {self.master_can}...")
-        self.master = piper_interface.PiperInterface(can_port=self.master_can)
+        self.master = C_PiperInterface_V2(self.master_can)
+        self.master.ConnectPort()
         print(f"  Master connected.")
 
         print(f"Connecting to slave arm on {self.slave_can}...")
-        self.slave = piper_interface.PiperInterface(can_port=self.slave_can)
+        self.slave = C_PiperInterface_V2(self.slave_can)
+        self.slave.ConnectPort()
         print(f"  Slave connected.")
 
+        print("  Waiting for CAN feedback...")
         time.sleep(2)
 
-    def _joints_at_zero(self, robot):
-        joints = robot.piper.GetArmJointMsgs().joint_state
+    def _joints_at_zero(self, piper):
+        joints = piper.GetArmJointMsgs().joint_state
         return (
             abs(joints.joint_1) < JOINT_ZERO_THRESHOLD and
             abs(joints.joint_2) < JOINT_ZERO_THRESHOLD and
@@ -57,9 +111,9 @@ class DualPiperController:
             abs(joints.joint_6) < JOINT_ZERO_THRESHOLD
         )
 
-    def _print_joint_positions(self, robot, name):
-        joints = robot.piper.GetArmJointMsgs().joint_state
-        gripper = robot.piper.GetArmGripperMsgs().gripper_state.grippers_angle
+    def _print_joint_positions(self, piper, name):
+        joints = piper.GetArmJointMsgs().joint_state
+        gripper = piper.GetArmGripperMsgs().gripper_state.grippers_angle
         print(
             f"  {name} joints (deg): "
             f"J1={joints.joint_1 * 0.001:7.2f}  J2={joints.joint_2 * 0.001:7.2f}  "
@@ -69,7 +123,6 @@ class DualPiperController:
         )
 
     def setup(self):
-        """Verify arms are at zero, enable slave for CAN control, set master to teach mode."""
         print("\n--- Setting up arms ---")
 
         # Verify both arms are at zero position
@@ -78,35 +131,28 @@ class DualPiperController:
         self._print_joint_positions(self.slave, "Slave")
 
         if not self._joints_at_zero(self.master):
-            print("  ERROR: Master is NOT at zero position!")
-            print("  Run 'bash reset.sh' first.")
+            print("  ERROR: Master is NOT at zero! Run 'bash reset.sh' first.")
             return False
         if not self._joints_at_zero(self.slave):
-            print("  ERROR: Slave is NOT at zero position!")
-            print("  Run 'bash reset.sh' first.")
+            print("  ERROR: Slave is NOT at zero! Run 'bash reset.sh' first.")
             return False
         print("  Both arms confirmed at zero.")
 
         # Enable slave arm with CAN joint control
         print("  Enabling slave arm...")
-        piper_init.reset_arm(
-            self.slave,
-            arm_controller=piper_interface.ArmController.POSITION_VELOCITY,
-            move_mode=piper_interface.MoveMode.JOINT,
-        )
-        piper_init.reset_gripper(self.slave)
-        print("  Slave in CAN joint control mode.")
+        if not full_enable(self.slave, "Slave"):
+            return False
+        self.slave.GripperCtrl(0, 1000, 0x01, 0)
 
-        # Set master to teach mode (disable motors so it can be moved by hand)
+        # Set master to teach mode (disable motors)
         print("  Setting master to TEACH mode (free to move by hand)...")
-        self.master.disable_arm()
+        self.master.DisableArm(7)
         time.sleep(0.5)
 
         print("--- Setup complete ---\n")
         return True
 
     def start_mirroring(self):
-        """Main loop: read master joints, send to slave."""
         print("=== MIRRORING ACTIVE ===")
         print("Move the master arm - the slave will follow.")
         print("Press Ctrl+C to stop.\n")
@@ -115,20 +161,17 @@ class DualPiperController:
         loop_count = 0
 
         while self.running:
-            # Read master state
-            joints = self.master.piper.GetArmJointMsgs().joint_state
+            joints = self.master.GetArmJointMsgs().joint_state
             joint_list = [
                 joints.joint_1, joints.joint_2, joints.joint_3,
                 joints.joint_4, joints.joint_5, joints.joint_6
             ]
-            gripper = self.master.piper.GetArmGripperMsgs().gripper_state.grippers_angle
+            gripper = self.master.GetArmGripperMsgs().gripper_state.grippers_angle
 
-            # Send to slave
-            self.slave.piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
-            self.slave.piper.JointCtrl(*joint_list)
-            self.slave.piper.GripperCtrl(abs(gripper), 1000, 0x01, 0)
+            self.slave.MotionCtrl_2(0x01, 0x01, 100, 0x00)
+            self.slave.JointCtrl(*joint_list)
+            self.slave.GripperCtrl(abs(gripper), 1000, 0x01, 0)
 
-            # Print status periodically (every ~1 second)
             loop_count += 1
             if loop_count % 200 == 0:
                 joint_deg = [j * 0.001 for j in joint_list]
@@ -146,33 +189,28 @@ class DualPiperController:
             return
         self.running = False
         print("\n\n=== STOPPING ===")
-
         if self.slave:
-            print("Disabling slave arm...")
             try:
-                self.slave.disable_arm()
-            except Exception as e:
-                print(f"  Warning: {e}")
-
+                self.slave.DisableArm(7)
+            except Exception:
+                pass
         if self.master:
-            print("Disabling master arm...")
             try:
-                self.master.disable_arm()
-            except Exception as e:
-                print(f"  Warning: {e}")
-
+                self.master.DisableArm(7)
+            except Exception:
+                pass
         print("Arms disabled.")
 
     def disconnect(self):
         if self.master:
             try:
-                self.master.piper.DisconnectPort()
+                self.master.DisconnectPort()
             except Exception:
                 pass
             self.master = None
         if self.slave:
             try:
-                self.slave.piper.DisconnectPort()
+                self.slave.DisconnectPort()
             except Exception:
                 pass
             self.slave = None
@@ -182,14 +220,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="Dual Piper Control - Mirror master arm movements to slave arm"
     )
-    parser.add_argument(
-        "--master", required=True,
-        help="CAN interface for the master arm (e.g. can0)"
-    )
-    parser.add_argument(
-        "--slave", required=True,
-        help="CAN interface for the slave arm (e.g. can1)"
-    )
+    parser.add_argument("--master", required=True, help="CAN interface for master arm")
+    parser.add_argument("--slave", required=True, help="CAN interface for slave arm")
     args = parser.parse_args()
 
     controller = DualPiperController(args.master, args.slave)
