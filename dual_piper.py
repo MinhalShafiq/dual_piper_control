@@ -42,8 +42,9 @@ def is_arm_enabled(piper):
 
 
 def print_positions(piper):
-    # Master data from control frames
+    # Master data from control frames (joints + gripper command on 0x155-0x159)
     ctrl = piper.GetArmJointCtrl().joint_ctrl
+    master_grip = piper.GetArmGripperCtrl().gripper_ctrl.grippers_angle
     # Slave data from feedback frames
     fb = piper.GetArmJointMsgs().joint_state
     fb_grip = piper.GetArmGripperMsgs().gripper_state.grippers_angle
@@ -52,7 +53,8 @@ def print_positions(piper):
         f"  Master: "
         f"J1={ctrl.joint_1*0.001:7.2f}  J2={ctrl.joint_2*0.001:7.2f}  "
         f"J3={ctrl.joint_3*0.001:7.2f}  J4={ctrl.joint_4*0.001:7.2f}  "
-        f"J5={ctrl.joint_5*0.001:7.2f}  J6={ctrl.joint_6*0.001:7.2f}"
+        f"J5={ctrl.joint_5*0.001:7.2f}  J6={ctrl.joint_6*0.001:7.2f}  "
+        f"Grip={master_grip*0.001:.1f}"
     )
     print(
         f"  Slave:  "
@@ -121,12 +123,15 @@ def main():
         piper.DisconnectPort()
         sys.exit(1)
 
-    # Send high-follow mode repeatedly to make sure it sticks
+    # Send high-follow mode repeatedly to make sure it sticks.
+    # NOTE: do NOT send GripperCtrl here — that would put angle=0 on CAN ID
+    # 0x159 and clobber the master arm's own gripper frames on the same ID.
+    # Slave gripper is enabled once inside enable_slave(); after that the
+    # master/slave firmware replicates master's 0x159 frames automatically.
     print("  Activating high-follow mode...")
     for _ in range(20):
         piper.MotionCtrl_2(0x01, 0x01, 100, 0xAD)
         piper.EnableArm(7)
-        piper.GripperCtrl(0, 1000, 0x01, 0)
         time.sleep(0.05)
 
     running = True
@@ -148,11 +153,11 @@ def main():
             loop_count += 1
 
             # Re-send enable + high-follow every 100 iterations (~0.5s)
-            # to prevent slave from losing sync
+            # to prevent slave from losing sync. We do NOT re-send GripperCtrl
+            # here — that would overwrite master's gripper command on 0x159.
             if loop_count % 100 == 0:
                 piper.MotionCtrl_2(0x01, 0x01, 100, 0xAD)
                 piper.EnableArm(7)
-                piper.GripperCtrl(0, 1000, 0x01, 0)
 
             # Print status every ~2 seconds
             if loop_count % 400 == 0:

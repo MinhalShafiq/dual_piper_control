@@ -46,7 +46,7 @@ This will prompt you to:
 You can also configure them individually:
 
 ```bash
-python3 reset_arms.py can0 master    # with master arm connected
+cla   # with master arm connected
 python3 reset_arms.py can0 slave     # with slave arm connected
 ```
 

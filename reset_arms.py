@@ -41,6 +41,13 @@ def configure_arm(can_port, role):
         piper.DisconnectPort()
         return False
 
+    time.sleep(0.5)
+
+    # Configure gripper parameters (saved on the arm, needed for gripper
+    # feedback and control to work). Without this the gripper has no data.
+    print(f"  Setting gripper parameters (range=100%, max=70mm)...")
+    piper.GripperTeachingPendantParamConfig(100, 70)
+
     time.sleep(1)
     print(f"  Configuration sent. Power cycle the arm for it to take effect.")
     piper.DisconnectPort()
