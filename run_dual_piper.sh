@@ -48,11 +48,19 @@ fi
 echo "CAN interfaces found."
 echo ""
 
-# Step 1: Reset both arms to zero position
-echo "Step 1: Resetting both arms to zero..."
-python3 "$SCRIPT_DIR/reset_arms.py" --left "$MASTER" --right "$SLAVE"
+# Step 1: Reset each arm in its own process
+echo "Step 1: Resetting master arm ($MASTER)..."
+python3 "$SCRIPT_DIR/reset_arms.py" "$MASTER" "Master"
 if [ $? -ne 0 ]; then
-    echo "Error: Reset failed. Exiting."
+    echo "Error: Master reset failed. Exiting."
+    exit 1
+fi
+
+echo ""
+echo "Step 1b: Resetting slave arm ($SLAVE)..."
+python3 "$SCRIPT_DIR/reset_arms.py" "$SLAVE" "Slave"
+if [ $? -ne 0 ]; then
+    echo "Error: Slave reset failed. Exiting."
     exit 1
 fi
 

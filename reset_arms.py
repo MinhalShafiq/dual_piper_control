@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 """
-Reset Piper arms to their zero/home position.
+Reset a single Piper arm to its zero/home position.
 
-Can be run at any time to bring arms back to zero.
 After reset, motors stay enabled holding the zero position.
 
 Usage:
-    python3 reset_arms.py --left can0 --right can1    # reset both
-    python3 reset_arms.py --left can0                  # reset only left
-    python3 reset_arms.py --right can1                 # reset only right
+    python3 reset_arms.py can0
+    python3 reset_arms.py can1
 """
 
 import sys
 import os
 import time
-import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from piper_sdk import C_PiperInterface_V2
@@ -88,8 +85,22 @@ def print_joint_positions(piper, name):
     )
 
 
-def move_to_zero(piper, name):
-    """Move arm to zero and hold. Returns True on success."""
+def reset_arm(can_port, name):
+    """Full reset sequence for one arm."""
+    print(f"\n--- Resetting {name} ({can_port}) ---")
+
+    # Connect
+    print(f"  Connecting to {can_port}...")
+    piper = C_PiperInterface_V2(can_port)
+    piper.ConnectPort()
+    time.sleep(2)
+
+    # Enable
+    if not enable_arm(piper, name):
+        print(f"  Failed to enable {name}.")
+        piper.DisconnectPort()
+        return False
+
     # Set CAN + joint control mode and wait for it to take effect
     print(f"  Setting {name} to CAN joint control mode...")
     start = time.time()
@@ -148,76 +159,20 @@ def move_to_zero(piper, name):
         time.sleep(1.0)
         print_joint_positions(piper, name)
 
-    return joints_at_zero(piper)
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Reset Piper arms to zero/home position"
-    )
-    parser.add_argument(
-        "--left", default=None,
-        help="CAN interface for the left arm (e.g. can0)"
-    )
-    parser.add_argument(
-        "--right", default=None,
-        help="CAN interface for the right arm (e.g. can1)"
-    )
-    args = parser.parse_args()
-
-    if not args.left and not args.right:
-        parser.error("Provide at least one arm: --left and/or --right")
-
-    print("============================================")
-    print("  Piper Arm Reset")
-    print("============================================")
-
-    # Connect ALL arms first before doing anything
-    arms = {}
-    if args.left:
-        print(f"\nConnecting to Left arm on {args.left}...")
-        left = C_PiperInterface_V2(args.left)
-        left.ConnectPort()
-        arms["Left"] = left
-        print(f"  Left connected.")
-
-    if args.right:
-        print(f"Connecting to Right arm on {args.right}...")
-        right = C_PiperInterface_V2(args.right)
-        right.ConnectPort()
-        arms["Right"] = right
-        print(f"  Right connected.")
-
-    # Wait for CAN feedback
-    print("Waiting for CAN feedback...")
-    time.sleep(2)
-
-    # Enable all arms
-    success = True
-    for name, piper in arms.items():
-        if not enable_arm(piper, name):
-            print(f"  Failed to enable {name}.")
-            success = False
-
-    if not success:
-        for piper in arms.values():
-            piper.DisconnectPort()
-        sys.exit(1)
-
-    # Move all arms to zero
-    for name, piper in arms.items():
-        print(f"\n--- Moving {name} to zero ---")
-        if not move_to_zero(piper, name):
-            print(f"  WARNING: {name} may not be exactly at zero.")
-
-    # Keep motors enabled, just disconnect SDK
-    print("")
-    for name, piper in arms.items():
-        print(f"  {name} holding at zero (motors stay enabled).")
-        piper.DisconnectPort()
-
-    print("\nAll arms reset to zero position.")
+    print(f"  {name} holding at zero (motors stay enabled).")
+    piper.DisconnectPort()
+    print(f"  {name} reset complete.")
+    return True
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) < 2:
+        print("Usage: python3 reset_arms.py <can_port> [name]")
+        print("  e.g. python3 reset_arms.py can0 Left")
+        sys.exit(1)
+
+    can_port = sys.argv[1]
+    name = sys.argv[2] if len(sys.argv) > 2 else can_port
+
+    success = reset_arm(can_port, name)
+    sys.exit(0 if success else 1)
