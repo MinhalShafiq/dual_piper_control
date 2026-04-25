@@ -9,8 +9,8 @@
 # ============================================================
 
 # CONFIGURATION - Change these to swap master/slave
-MASTER="can_left"
-SLAVE="can_right"
+MASTER="can0"
+SLAVE="can1"
 
 # ============================================================
 # You shouldn't need to edit below this line

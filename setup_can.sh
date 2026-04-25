@@ -15,8 +15,8 @@ set -e
 # Format: USB_PORTS["bus-info"]="can_name:bitrate"
 # Find bus-info by running: sudo ethtool -i can0 | grep bus-info
 declare -A USB_PORTS
-USB_PORTS["1-2:1.0"]="can_left:1000000"
-USB_PORTS["1-4:1.0"]="can_right:1000000"
+USB_PORTS["1-2:1.0"]="can0:1000000"
+USB_PORTS["1-3:1.0"]="can1:1000000"
 
 EXPECTED_CAN_COUNT=${#USB_PORTS[@]}
 # ============================================================

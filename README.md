@@ -57,7 +57,7 @@ Edit the `USB_PORTS` section in `setup_can.sh` with your bus-info values:
 
 ```bash
 USB_PORTS["1-2:1.0"]="can_left:1000000"
-USB_PORTS["1-4:1.0"]="can_right:1000000"
+USB_PORTS["1-3:1.0"]="can_right:1000000"
 ```
 
 Then run:

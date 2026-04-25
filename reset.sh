@@ -8,8 +8,8 @@
 #   bash reset.sh right        # reset right arm only
 # ============================================================
 
-LEFT="can_left"
-RIGHT="can_right"
+LEFT="can0"
+RIGHT="can1"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
