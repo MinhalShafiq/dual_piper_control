@@ -32,6 +32,7 @@ GRIPPER_EFFORT = 1000
 GRIPPER_CODE = 0x01
 LOOP_RATE = 0.005           # 200Hz control loop
 ENABLE_TIMEOUT = 10
+JOINT_ZERO_THRESHOLD = 500  # 0.5 degrees in 0.001 deg units
 
 
 class DualPiperController:
@@ -86,9 +87,50 @@ class DualPiperController:
         print(f"  ERROR: {name} enable timed out!")
         return False
 
+    def _joints_at_zero(self, piper):
+        """Check if all joints are within threshold of zero."""
+        joints = piper.GetArmJointMsgs().joint_state
+        return (
+            abs(joints.joint_1) < JOINT_ZERO_THRESHOLD and
+            abs(joints.joint_2) < JOINT_ZERO_THRESHOLD and
+            abs(joints.joint_3) < JOINT_ZERO_THRESHOLD and
+            abs(joints.joint_4) < JOINT_ZERO_THRESHOLD and
+            abs(joints.joint_5) < JOINT_ZERO_THRESHOLD and
+            abs(joints.joint_6) < JOINT_ZERO_THRESHOLD
+        )
+
+    def _print_joint_positions(self, piper, name):
+        """Print current joint positions."""
+        joints = piper.GetArmJointMsgs().joint_state
+        gripper = piper.GetArmGripperMsgs().gripper_state.grippers_angle
+        print(
+            f"  {name} joints (deg): "
+            f"J1={joints.joint_1 * 0.001:7.2f}  J2={joints.joint_2 * 0.001:7.2f}  "
+            f"J3={joints.joint_3 * 0.001:7.2f}  J4={joints.joint_4 * 0.001:7.2f}  "
+            f"J5={joints.joint_5 * 0.001:7.2f}  J6={joints.joint_6 * 0.001:7.2f}  "
+            f"Grip={gripper * 0.001:.1f}"
+        )
+
+    def _verify_at_zero(self, piper, name):
+        """Check that arm is at zero position. Returns True if OK."""
+        self._print_joint_positions(piper, name)
+        if not self._joints_at_zero(piper):
+            print(f"  ERROR: {name} is NOT at zero position!")
+            print(f"  Run 'bash reset.sh' first to reset both arms.")
+            return False
+        print(f"  {name} confirmed at zero.")
+        return True
+
     def setup(self):
-        """Enable slave arm for CAN control, set master to teach mode."""
+        """Verify arms are at zero, enable slave for CAN control, set master to teach mode."""
         print("\n--- Setting up arms ---")
+
+        # Verify both arms are at zero position before proceeding
+        print("  Checking arm positions...")
+        if not self._verify_at_zero(self.master, "Master"):
+            return False
+        if not self._verify_at_zero(self.slave, "Slave"):
+            return False
 
         # Enable slave arm and set to CAN joint control mode
         if not self._enable_arm(self.slave, "Slave"):

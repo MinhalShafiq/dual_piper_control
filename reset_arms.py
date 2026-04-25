@@ -163,10 +163,10 @@ def reset_single_arm(can_port, name):
         time.sleep(1.0)
         print_joint_positions(piper, name)
 
-    # Disable motors and disconnect
-    print(f"  Disabling {name} motors...")
-    piper.DisableArm(ENABLE_MOTORS)
-    time.sleep(0.5)
+    # Keep motors enabled and holding zero position.
+    # Do NOT disable — the arm would go limp and sag under gravity.
+    # Just disconnect the SDK (CAN bus closes but arm holds last command).
+    print(f"  {name} holding at zero (motors stay enabled).")
     piper.DisconnectPort()
 
     print(f"  {name} reset complete.")
