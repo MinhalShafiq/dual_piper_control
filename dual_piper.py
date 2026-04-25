@@ -36,12 +36,12 @@ def print_status(piper):
     fb_grip = piper.GetArmGripperMsgs().gripper_state.grippers_angle
 
     print(
-        f"  Master: J1={ctrl.joint_state.joint_1*0.001:7.2f} "
-        f"J2={ctrl.joint_state.joint_2*0.001:7.2f} "
-        f"J3={ctrl.joint_state.joint_3*0.001:7.2f} "
-        f"J4={ctrl.joint_state.joint_4*0.001:7.2f} "
-        f"J5={ctrl.joint_state.joint_5*0.001:7.2f} "
-        f"J6={ctrl.joint_state.joint_6*0.001:7.2f}"
+        f"  Master: J1={ctrl.joint_ctrl.joint_1*0.001:7.2f} "
+        f"J2={ctrl.joint_ctrl.joint_2*0.001:7.2f} "
+        f"J3={ctrl.joint_ctrl.joint_3*0.001:7.2f} "
+        f"J4={ctrl.joint_ctrl.joint_4*0.001:7.2f} "
+        f"J5={ctrl.joint_ctrl.joint_5*0.001:7.2f} "
+        f"J6={ctrl.joint_ctrl.joint_6*0.001:7.2f}"
     )
     print(
         f"  Slave:  J1={fb.joint_1*0.001:7.2f} "
