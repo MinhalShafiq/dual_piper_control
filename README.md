@@ -5,7 +5,7 @@ Replicate movement from one Piper robotic arm to another in real-time. One arm a
 ## How It Works
 
 1. Both arms connect over separate CAN interfaces (one USB CAN adapter per arm)
-2. Both arms reset to their zero/home position
+2. Both arms reset to their zero/home position (separate step, can be run anytime)
 3. The master arm enters teach mode (motors disabled, free to move by hand)
 4. The slave arm enters CAN control mode
 5. At 200Hz, the master's joint angles and gripper state are read and sent to the slave
@@ -15,10 +15,14 @@ Replicate movement from one Piper robotic arm to another in real-time. One arm a
 
 ```
 dual_piper_control/
-├── run_dual_piper.sh   # Main launcher script (edit master/slave here)
-├── setup_can.sh        # CAN interface setup for two adapters
-├── dual_piper.py       # Python control script
-├── piper_sdk/          # Piper SDK (standalone copy)
+├── run_dual_piper.sh   # Full launcher (reset + mirror)
+├── reset.sh            # Standalone reset (use anytime)
+├── reset_arms.py       # Reset script (Python)
+├── dual_piper.py       # Mirroring script (Python)
+├── setup_can.sh        # CAN interface setup
+├── piper_utils.py      # Shared utilities
+├── piper_sdk/          # Piper SDK
+├── examples/           # Single-arm example scripts
 └── README.md
 ```
 
@@ -32,7 +36,7 @@ dual_piper_control/
   ```
 - Python packages:
   ```bash
-  pip install python-can
+  pip install -r requirements.txt
   ```
 
 ## Setup
@@ -62,8 +66,6 @@ Then run:
 sudo bash setup_can.sh
 ```
 
-This names and activates both CAN interfaces at 1Mbps.
-
 ### 3. Choose Master and Slave
 
 Edit the top of `run_dual_piper.sh`:
@@ -77,29 +79,48 @@ Swap the values to reverse which arm leads.
 
 ## Usage
 
+### Full run (reset + mirror)
+
 ```bash
 bash run_dual_piper.sh
 ```
 
-What happens:
-1. Both arms enable and move to the zero/home position
-2. Arms are held at zero for a few seconds to stabilize
-3. Master arm releases (teach mode) -- you can now move it by hand
-4. Slave arm follows the master's movements in real-time
-5. Joint positions are printed every ~1 second
-6. Press **Ctrl+C** to stop (both arms are disabled safely)
+This resets both arms to zero first, then starts mirroring.
 
-You can also run the Python script directly:
+### Reset only (use anytime)
+
+```bash
+bash reset.sh              # reset both arms
+bash reset.sh left         # reset left arm only
+bash reset.sh right        # reset right arm only
+```
+
+Or directly with Python:
+
+```bash
+python3 reset_arms.py --left can_left --right can_right
+python3 reset_arms.py --left can_left                     # left only
+python3 reset_arms.py --right can_right                   # right only
+```
+
+### Mirror only (arms already at zero)
 
 ```bash
 python3 dual_piper.py --master can_left --slave can_right
 ```
 
+### What happens during mirroring
+
+1. Slave arm enables and enters CAN joint control mode
+2. Master arm enters teach mode (motors disabled, free to move by hand)
+3. Joint positions are printed every ~1 second
+4. Press **Ctrl+C** to stop (both arms are disabled safely)
+
 ## Troubleshooting
 
 ### CAN interfaces not found
 
-Make sure both USB CAN adapters are plugged in, then re-run `sudo bash setup_can.sh`. Check available interfaces with:
+Make sure both USB CAN adapters are plugged in, then run `sudo bash setup_can.sh`. Check available interfaces:
 
 ```bash
 ip -br link show type can
@@ -107,15 +128,16 @@ ip -br link show type can
 
 ### Arm fails to enable
 
-- Check that the arm is powered on
-- Check CAN cable connections
-- The script waits up to 10 seconds for enable; if it times out, power cycle the arm and try again
+- Check that the arm is powered on and CAN cables are connected
+- The script waits up to 10 seconds; if it times out, power cycle the arm
+- Try running `piper_sdk/demo/V2/piper_reset.py` for a single arm to clear errors
+- Check control mode with `piper_sdk/demo/V2/piper_status.py`
 
 ### Arm drifts after reset
 
-The reset procedure sends repeated zero-position commands and verifies all joints are within 0.5 degrees of zero before proceeding. If drift still occurs, check for mechanical issues or loose joints.
+The reset holds the zero position for 3 seconds after reaching it to let the arm stabilize. If drift still occurs, check for mechanical issues.
 
 ### Slave doesn't follow smoothly
 
 - Make sure both CAN adapters are on separate USB ports (not through the same hub)
-- The control loop runs at 200Hz; if your system is slow, increase the `LOOP_RATE` value in `dual_piper.py`
+- The control loop runs at 200Hz; increase `LOOP_RATE` in `dual_piper.py` if needed

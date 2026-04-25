@@ -45,7 +45,19 @@ if ! ip link show "$SLAVE" &>/dev/null; then
     exit 1
 fi
 
-echo "CAN interfaces found. Starting control..."
+echo "CAN interfaces found."
 echo ""
 
+# Step 1: Reset both arms to zero position
+echo "Step 1: Resetting both arms to zero..."
+python3 "$SCRIPT_DIR/reset_arms.py" --left "$MASTER" --right "$SLAVE"
+if [ $? -ne 0 ]; then
+    echo "Error: Reset failed. Exiting."
+    exit 1
+fi
+
+echo ""
+
+# Step 2: Start mirroring
+echo "Step 2: Starting mirroring..."
 python3 "$SCRIPT_DIR/dual_piper.py" --master "$MASTER" --slave "$SLAVE"
