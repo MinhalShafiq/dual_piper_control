@@ -2,7 +2,7 @@
 """
 Reset a single Piper arm to its zero/home position.
 
-After reset, motors stay enabled holding the zero position.
+Uses piper_control library for reliable enable/reset sequence.
 
 Usage:
     python3 reset_arms.py can0
@@ -14,54 +14,18 @@ import os
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from piper_sdk import C_PiperInterface_V2
+
+from piper_control import piper_interface, piper_init
 
 # Constants
-CAN_CTRL_MODE = 0x01
-JOINT_CTRL_MODE = 0x01
-RESET_SPEED = 50
-VEL_MODE = 0x00
-ENABLE_MOTORS = 7
-GRIPPER_EFFORT = 1000
-GRIPPER_CODE = 0x01
-ENABLE_TIMEOUT = 10
-RESET_TIMEOUT = 15
 JOINT_ZERO_THRESHOLD = 500  # 0.5 degrees in 0.001 deg units
+RESET_TIMEOUT = 15
 HOME_POSITION = [0, 0, 0, 0, 0, 0]
+MOVE_SPEED = 50
 
 
-def enable_arm(piper, name):
-    """Enable all motors on an arm. Returns True on success."""
-    print(f"  Enabling {name}...")
-    piper.EnableArm(ENABLE_MOTORS)
-    piper.GripperCtrl(0, GRIPPER_EFFORT, GRIPPER_CODE, 0)
-    time.sleep(0.5)
-
-    start = time.time()
-    while time.time() - start < ENABLE_TIMEOUT:
-        enable_list = [
-            piper.GetArmLowSpdInfoMsgs().motor_1.foc_status.driver_enable_status,
-            piper.GetArmLowSpdInfoMsgs().motor_2.foc_status.driver_enable_status,
-            piper.GetArmLowSpdInfoMsgs().motor_3.foc_status.driver_enable_status,
-            piper.GetArmLowSpdInfoMsgs().motor_4.foc_status.driver_enable_status,
-            piper.GetArmLowSpdInfoMsgs().motor_5.foc_status.driver_enable_status,
-            piper.GetArmLowSpdInfoMsgs().motor_6.foc_status.driver_enable_status,
-        ]
-        if all(enable_list):
-            print(f"  {name} enabled.")
-            return True
-        print(f"  {name} enable status: {enable_list}")
-        piper.EnableArm(ENABLE_MOTORS)
-        piper.GripperCtrl(0, GRIPPER_EFFORT, GRIPPER_CODE, 0)
-        time.sleep(0.5)
-
-    print(f"  ERROR: {name} enable timed out!")
-    return False
-
-
-def joints_at_zero(piper):
-    """Check if all joints are within threshold of zero."""
-    joints = piper.GetArmJointMsgs().joint_state
+def joints_at_zero(robot):
+    joints = robot.piper.GetArmJointMsgs().joint_state
     return (
         abs(joints.joint_1) < JOINT_ZERO_THRESHOLD and
         abs(joints.joint_2) < JOINT_ZERO_THRESHOLD and
@@ -72,10 +36,9 @@ def joints_at_zero(piper):
     )
 
 
-def print_joint_positions(piper, name):
-    """Print current joint positions."""
-    joints = piper.GetArmJointMsgs().joint_state
-    gripper = piper.GetArmGripperMsgs().gripper_state.grippers_angle
+def print_joint_positions(robot, name):
+    joints = robot.piper.GetArmJointMsgs().joint_state
+    gripper = robot.piper.GetArmGripperMsgs().gripper_state.grippers_angle
     print(
         f"  {name} joints (deg): "
         f"J1={joints.joint_1 * 0.001:7.2f}  J2={joints.joint_2 * 0.001:7.2f}  "
@@ -86,48 +49,40 @@ def print_joint_positions(piper, name):
 
 
 def reset_arm(can_port, name):
-    """Full reset sequence for one arm."""
     print(f"\n--- Resetting {name} ({can_port}) ---")
 
-    # Connect
+    # Connect using piper_control
     print(f"  Connecting to {can_port}...")
-    piper = C_PiperInterface_V2(can_port)
-    piper.ConnectPort()
-    time.sleep(2)
+    robot = piper_interface.PiperInterface(can_port=can_port)
+    time.sleep(1)
 
-    # Enable
-    if not enable_arm(piper, name):
-        print(f"  Failed to enable {name}.")
-        piper.DisconnectPort()
-        return False
+    # Reset arm: disable -> enable -> set CAN control mode
+    # This handles the full sequence including emergency stop resume
+    print(f"  Resetting and enabling {name}...")
+    piper_init.reset_arm(
+        robot,
+        arm_controller=piper_interface.ArmController.POSITION_VELOCITY,
+        move_mode=piper_interface.MoveMode.JOINT,
+        timeout_seconds=15.0,
+    )
+    piper_init.reset_gripper(robot, timeout_seconds=10.0)
+    print(f"  {name} enabled in CAN control mode.")
 
-    # Set CAN + joint control mode and wait for it to take effect
-    print(f"  Setting {name} to CAN joint control mode...")
-    start = time.time()
-    while time.time() - start < ENABLE_TIMEOUT:
-        piper.MotionCtrl_2(CAN_CTRL_MODE, JOINT_CTRL_MODE, RESET_SPEED, VEL_MODE)
-        time.sleep(0.5)
-        ctrl_mode = piper.GetArmStatus().arm_status.ctrl_mode
-        print(f"  {name} ctrl_mode: {ctrl_mode}")
-        if ctrl_mode == CAN_CTRL_MODE:
-            break
-    print(f"  {name} in CAN control mode.")
-
-    # Move to home
+    # Move to zero position
     print(f"  Moving {name} to zero position...")
-    print_joint_positions(piper, name)
+    print_joint_positions(robot, name)
+
     start = time.time()
     settled_count = 0
 
     while time.time() - start < RESET_TIMEOUT:
-        piper.EnableArm(ENABLE_MOTORS)
-        piper.MotionCtrl_2(CAN_CTRL_MODE, JOINT_CTRL_MODE, RESET_SPEED, VEL_MODE)
-        piper.JointCtrl(*HOME_POSITION)
-        piper.GripperCtrl(0, GRIPPER_EFFORT, GRIPPER_CODE, 0)
+        robot.piper.MotionCtrl_2(0x01, 0x01, MOVE_SPEED, 0x00)
+        robot.piper.JointCtrl(*HOME_POSITION)
+        robot.piper.GripperCtrl(0, 1000, 0x01, 0)
         time.sleep(0.005)
 
-        motion_done = piper.GetArmStatus().arm_status.motion_status == 0
-        at_zero = joints_at_zero(piper)
+        motion_done = robot.piper.GetArmStatus().arm_status.motion_status == 0
+        at_zero = joints_at_zero(robot)
 
         if motion_done and at_zero:
             settled_count += 1
@@ -139,28 +94,16 @@ def reset_arm(can_port, name):
     # Hold at zero to stabilize
     print(f"  Holding {name} at zero to stabilize...")
     for _ in range(200):
-        piper.EnableArm(ENABLE_MOTORS)
-        piper.MotionCtrl_2(CAN_CTRL_MODE, JOINT_CTRL_MODE, RESET_SPEED, VEL_MODE)
-        piper.JointCtrl(*HOME_POSITION)
-        piper.GripperCtrl(0, GRIPPER_EFFORT, GRIPPER_CODE, 0)
+        robot.piper.MotionCtrl_2(0x01, 0x01, MOVE_SPEED, 0x00)
+        robot.piper.JointCtrl(*HOME_POSITION)
+        robot.piper.GripperCtrl(0, 1000, 0x01, 0)
         time.sleep(0.005)
 
-    # Final check
-    print_joint_positions(piper, name)
+    print_joint_positions(robot, name)
 
-    if not joints_at_zero(piper):
-        print(f"  WARNING: {name} not exactly at zero. Sending correction...")
-        for _ in range(400):
-            piper.EnableArm(ENABLE_MOTORS)
-            piper.MotionCtrl_2(CAN_CTRL_MODE, JOINT_CTRL_MODE, 20, VEL_MODE)
-            piper.JointCtrl(*HOME_POSITION)
-            piper.GripperCtrl(0, GRIPPER_EFFORT, GRIPPER_CODE, 0)
-            time.sleep(0.005)
-        time.sleep(1.0)
-        print_joint_positions(piper, name)
-
+    # Keep motors enabled (don't disable - arm would sag)
     print(f"  {name} holding at zero (motors stay enabled).")
-    piper.DisconnectPort()
+    robot.piper.DisconnectPort()
     print(f"  {name} reset complete.")
     return True
 
@@ -174,5 +117,15 @@ if __name__ == "__main__":
     can_port = sys.argv[1]
     name = sys.argv[2] if len(sys.argv) > 2 else can_port
 
-    success = reset_arm(can_port, name)
-    sys.exit(0 if success else 1)
+    try:
+        success = reset_arm(can_port, name)
+        sys.exit(0 if success else 1)
+    except TimeoutError as e:
+        print(f"\n  ERROR: {e}")
+        print("  Arm may need a power cycle. Check CAN cables and power.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n  ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

@@ -12,6 +12,7 @@ opencv-python-headless==4.11.0.86
 packaging==24.2
 pillow==11.1.0
 piper-sdk==0.1.13
+piper-control
 pyparsing==3.2.1
 PyQt5==5.15.11
 PyQt5-Qt5==5.15.16
