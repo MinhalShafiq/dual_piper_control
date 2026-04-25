@@ -26,9 +26,6 @@ from piper_sdk import C_PiperInterface_V2
 
 # Constants
 ENABLE_TIMEOUT = 10
-ZERO_TIMEOUT = 15
-JOINT_ZERO_THRESHOLD = 500  # 0.5 degrees in 0.001 deg units
-HOME_POSITION = [0, 0, 0, 0, 0, 0]
 LOOP_RATE = 0.005  # 200Hz
 
 
@@ -41,18 +38,6 @@ def is_arm_enabled(piper):
         msgs.motor_4.foc_status.driver_enable_status and
         msgs.motor_5.foc_status.driver_enable_status and
         msgs.motor_6.foc_status.driver_enable_status
-    )
-
-
-def joints_at_zero(piper):
-    joints = piper.GetArmJointMsgs().joint_state
-    return (
-        abs(joints.joint_1) < JOINT_ZERO_THRESHOLD and
-        abs(joints.joint_2) < JOINT_ZERO_THRESHOLD and
-        abs(joints.joint_3) < JOINT_ZERO_THRESHOLD and
-        abs(joints.joint_4) < JOINT_ZERO_THRESHOLD and
-        abs(joints.joint_5) < JOINT_ZERO_THRESHOLD and
-        abs(joints.joint_6) < JOINT_ZERO_THRESHOLD
     )
 
 
@@ -107,57 +92,6 @@ def enable_slave(piper):
     return False
 
 
-def move_slave_to_zero(piper):
-    """Move slave arm to zero position before master takes over."""
-    print("  Moving slave to zero position...")
-
-    fb = piper.GetArmJointMsgs().joint_state
-    print(
-        f"  Current slave position: "
-        f"J1={fb.joint_1*0.001:.2f}  J2={fb.joint_2*0.001:.2f}  "
-        f"J3={fb.joint_3*0.001:.2f}  J4={fb.joint_4*0.001:.2f}  "
-        f"J5={fb.joint_5*0.001:.2f}  J6={fb.joint_6*0.001:.2f}"
-    )
-
-    start = time.time()
-    settled = 0
-    while time.time() - start < ZERO_TIMEOUT:
-        # Send zero position command at controlled speed
-        piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)
-        piper.EnableArm(7)
-        piper.JointCtrl(*HOME_POSITION)
-        piper.GripperCtrl(0, 1000, 0x01, 0)
-        time.sleep(0.005)
-
-        if piper.GetArmStatus().arm_status.motion_status == 0 and joints_at_zero(piper):
-            settled += 1
-            if settled >= 10:
-                break
-        else:
-            settled = 0
-
-    # Hold at zero
-    for _ in range(200):
-        piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)
-        piper.EnableArm(7)
-        piper.JointCtrl(*HOME_POSITION)
-        piper.GripperCtrl(0, 1000, 0x01, 0)
-        time.sleep(0.005)
-
-    if joints_at_zero(piper):
-        print("  Slave at zero position.")
-        return True
-    else:
-        fb = piper.GetArmJointMsgs().joint_state
-        print(
-            f"  WARNING: Slave not at zero. Position: "
-            f"J1={fb.joint_1*0.001:.2f}  J2={fb.joint_2*0.001:.2f}  "
-            f"J3={fb.joint_3*0.001:.2f}  J4={fb.joint_4*0.001:.2f}  "
-            f"J5={fb.joint_5*0.001:.2f}  J6={fb.joint_6*0.001:.2f}"
-        )
-        return False
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Dual Piper Control - Master/slave arm monitor and control"
@@ -165,10 +99,6 @@ def main():
     parser.add_argument(
         "--can", default="can0",
         help="CAN interface (both arms share one bus, default: can0)"
-    )
-    parser.add_argument(
-        "--skip-zero", action="store_true",
-        help="Skip moving slave to zero position"
     )
     args = parser.parse_args()
 
@@ -182,22 +112,22 @@ def main():
     piper.ConnectPort()
     time.sleep(2)
 
-    # Step 1: Enable slave arm
+    # Enable slave arm in high-follow mode.
+    # Both arms are already on, so don't send zero commands —
+    # that would conflict with master's CAN frames and cause jiggling.
+    # To start at zero, manually move the master arm to zero before running.
     if not enable_slave(piper):
         print("Failed to enable slave. Check connections and power.")
         piper.DisconnectPort()
         sys.exit(1)
 
-    # Step 2: Move slave to zero (unless skipped)
-    if not args.skip_zero:
-        move_slave_to_zero(piper)
-
-    # Step 3: Switch to high-follow mode for master/slave operation
-    print("  Switching slave to high-follow mode...")
-    piper.MotionCtrl_2(0x01, 0x01, 100, 0xAD)
-    piper.EnableArm(7)
-    piper.GripperCtrl(0, 1000, 0x01, 0)
-    time.sleep(1)
+    # Send high-follow mode repeatedly to make sure it sticks
+    print("  Activating high-follow mode...")
+    for _ in range(20):
+        piper.MotionCtrl_2(0x01, 0x01, 100, 0xAD)
+        piper.EnableArm(7)
+        piper.GripperCtrl(0, 1000, 0x01, 0)
+        time.sleep(0.05)
 
     running = True
 
@@ -217,13 +147,15 @@ def main():
         while running:
             loop_count += 1
 
-            # Re-send enable periodically to keep slave responsive
-            if loop_count % 400 == 0:  # Every ~2 seconds
+            # Re-send enable + high-follow every 100 iterations (~0.5s)
+            # to prevent slave from losing sync
+            if loop_count % 100 == 0:
                 piper.MotionCtrl_2(0x01, 0x01, 100, 0xAD)
                 piper.EnableArm(7)
+                piper.GripperCtrl(0, 1000, 0x01, 0)
 
-            # Print status every ~1 second
-            if loop_count % 200 == 0:
+            # Print status every ~2 seconds
+            if loop_count % 400 == 0:
                 print_positions(piper)
 
             time.sleep(LOOP_RATE)
