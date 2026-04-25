@@ -1,71 +1,29 @@
 #!/bin/bash
 # ============================================================
-# Dual Piper Control - Launcher Script
+# Dual Piper Control - Monitor master/slave arm positions
+#
+# Both arms must already be configured (bash reset.sh) and
+# connected to the SAME CAN bus with slave powered on first.
 #
 # Usage:
 #   bash run_dual_piper.sh
-#
-# Change MASTER and SLAVE below to swap which arm leads.
 # ============================================================
 
-# CONFIGURATION - Change these to swap master/slave
-MASTER="can0"
-SLAVE="can1"
-
-# ============================================================
-# You shouldn't need to edit below this line
-# ============================================================
+CAN_PORT="can0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "============================================"
 echo "  Dual Piper Arm Control"
 echo "============================================"
-echo "  Master arm: $MASTER"
-echo "  Slave arm:  $SLAVE"
+echo "  CAN bus: $CAN_PORT"
 echo "============================================"
 echo ""
 
-# Check if CAN interfaces exist
-if ! ip link show "$MASTER" &>/dev/null; then
-    echo "Error: CAN interface '$MASTER' not found."
-    echo "Run 'sudo bash setup_can.sh' first to configure CAN interfaces."
-    echo ""
-    echo "Available CAN interfaces:"
-    ip -br link show type can 2>/dev/null || echo "  (none found)"
+if ! ip link show "$CAN_PORT" &>/dev/null; then
+    echo "Error: CAN interface '$CAN_PORT' not found."
+    echo "Run 'sudo bash setup_can.sh' first."
     exit 1
 fi
 
-if ! ip link show "$SLAVE" &>/dev/null; then
-    echo "Error: CAN interface '$SLAVE' not found."
-    echo "Run 'sudo bash setup_can.sh' first to configure CAN interfaces."
-    echo ""
-    echo "Available CAN interfaces:"
-    ip -br link show type can 2>/dev/null || echo "  (none found)"
-    exit 1
-fi
-
-echo "CAN interfaces found."
-echo ""
-
-# Step 1: Reset each arm in its own process
-echo "Step 1: Resetting master arm ($MASTER)..."
-python3 "$SCRIPT_DIR/reset_arms.py" "$MASTER" "Master"
-if [ $? -ne 0 ]; then
-    echo "Error: Master reset failed. Exiting."
-    exit 1
-fi
-
-echo ""
-echo "Step 1b: Resetting slave arm ($SLAVE)..."
-python3 "$SCRIPT_DIR/reset_arms.py" "$SLAVE" "Slave"
-if [ $? -ne 0 ]; then
-    echo "Error: Slave reset failed. Exiting."
-    exit 1
-fi
-
-echo ""
-
-# Step 2: Start mirroring
-echo "Step 2: Starting mirroring..."
-python3 "$SCRIPT_DIR/dual_piper.py" --master "$MASTER" --slave "$SLAVE"
+python3 "$SCRIPT_DIR/dual_piper.py" --can "$CAN_PORT"

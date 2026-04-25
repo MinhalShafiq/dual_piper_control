@@ -1,36 +1,29 @@
 #!/bin/bash
-# Setup two CAN interfaces for dual piper arm control.
+# Setup CAN interface for dual piper arm control.
+# Both arms share ONE CAN bus, so only one interface needed.
+#
 # Usage: sudo bash setup_can.sh
-#
-# Uses piper_sdk/can_activate.sh with USB addresses to ensure each
-# adapter always gets the correct name regardless of plug order.
-#
-# To find your USB addresses, plug in one adapter at a time and run:
-#   sudo ethtool -i can0 | grep bus-info
-
-set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ============================================================
-# CONFIGURATION - Edit these to match your hardware
+# CONFIGURATION
 # ============================================================
-# Format: can_activate.sh <name> <bitrate> <usb_address>
-CAN0_USB="1-3:1.0"
-CAN1_USB="1-2:1.0"
+CAN_NAME="can0"
 BITRATE=1000000
+# Optional: USB address (find with: sudo ethtool -i can0 | grep bus-info)
+# USB_ADDRESS="1-3:1.0"
 # ============================================================
 
 echo "========== Dual Piper CAN Setup =========="
-echo "  can0 -> USB $CAN0_USB @ ${BITRATE}bps"
-echo "  can1 -> USB $CAN1_USB @ ${BITRATE}bps"
-echo ""
 
-bash "$SCRIPT_DIR/piper_sdk/can_activate.sh" can0 "$BITRATE" "$CAN0_USB"
-echo ""
-bash "$SCRIPT_DIR/piper_sdk/can_activate.sh" can1 "$BITRATE" "$CAN1_USB"
+if [ -n "$USB_ADDRESS" ]; then
+    bash "$SCRIPT_DIR/piper_sdk/can_activate.sh" "$CAN_NAME" "$BITRATE" "$USB_ADDRESS"
+else
+    bash "$SCRIPT_DIR/piper_sdk/can_activate.sh" "$CAN_NAME" "$BITRATE"
+fi
 
 echo ""
-echo "CAN interfaces configured:"
+echo "CAN interface:"
 ip -br link show type can
 echo "========== Setup Complete =========="

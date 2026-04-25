@@ -1,35 +1,13 @@
 # Dual Piper Control
 
-Replicate movement from one Piper robotic arm to another in real-time. One arm acts as the **master** (moved by hand) and the other as the **slave** (follows automatically).
-
-## How It Works
-
-1. Both arms connect over separate CAN interfaces (one USB CAN adapter per arm)
-2. Both arms reset to their zero/home position (separate step, can be run anytime)
-3. The master arm enters teach mode (motors disabled, free to move by hand)
-4. The slave arm enters CAN control mode
-5. At 200Hz, the master's joint angles and gripper state are read and sent to the slave
-6. The slave mirrors the master's position in real-time
-
-## Repository Structure
-
-```
-dual_piper_control/
-├── run_dual_piper.sh   # Full launcher (reset + mirror)
-├── reset.sh            # Standalone reset (use anytime)
-├── reset_arms.py       # Reset script (Python)
-├── dual_piper.py       # Mirroring script (Python)
-├── setup_can.sh        # CAN interface setup
-├── piper_utils.py      # Shared utilities
-├── piper_sdk/          # Piper SDK
-├── examples/           # Single-arm example scripts
-└── README.md
-```
+Replicate movement from one Piper robotic arm to another using the official hardware master/slave mode. The master arm is moved by hand and the slave follows automatically through the CAN bus.
 
 ## Prerequisites
 
-- Two Piper robotic arms, each connected to its own USB CAN adapter
-- Python 3 with virtual environment
+- Two Piper robotic arms
+- One USB CAN adapter (both arms share one bus)
+- Y-splitter CAN cable or CAN hub to connect both arms to the adapter
+- Python 3
 - System packages:
   ```bash
   sudo apt install ethtool can-utils
@@ -37,136 +15,114 @@ dual_piper_control/
 
 ## Installation
 
-### 1. Create virtual environment
-
 ```bash
 python3 -m venv piper_env
 source piper_env/bin/activate
-```
-
-### 2. Install dependencies
-
-```bash
 pip install -r requirements.txt
-sudo apt update && sudo apt install can-utils ethtool
 ```
 
-## Setup
+## One-Time Configuration
 
-### 1. Activate CAN Interfaces
+Each arm must be configured with its role (master or slave). This only needs to be done once per arm — the setting is saved on the arm.
 
-Each arm needs its own CAN adapter. You **must** specify the USB address to avoid mix-ups:
+### Step 1: Activate CAN
 
 ```bash
-# IMPORTANT: Always pass the USB address (third argument) so each adapter
-# keeps its correct name. Without it, the script may rename the wrong adapter.
-sudo bash piper_sdk/can_activate.sh can0 1000000 1-3:1.0
-sudo bash piper_sdk/can_activate.sh can1 1000000 1-2:1.0
+sudo bash piper_sdk/can_activate.sh can0 1000000
 ```
 
-Or use the shortcut:
+### Step 2: Configure each arm
+
+Connect one arm at a time to the CAN adapter and run:
 
 ```bash
-sudo bash setup_can.sh
+bash reset.sh
 ```
 
-To find which USB port maps to which CAN interface:
+This will prompt you to:
+1. Connect the master arm and press Enter to configure it
+2. Disconnect master, connect the slave arm and press Enter to configure it
+
+You can also configure them individually:
 
 ```bash
-sudo ethtool -i can0 | grep bus-info
-sudo ethtool -i can1 | grep bus-info
+python3 reset_arms.py can0 master    # with master arm connected
+python3 reset_arms.py can0 slave     # with slave arm connected
 ```
 
-Verify both are up:
+### Step 3: Wire both arms to the same CAN bus
 
-```bash
-ip -br link show type can
-```
+1. Power OFF both arms
+2. Connect both arms to the same CAN adapter using a Y-splitter cable
+3. Power ON the slave arm first
+4. Power ON the master arm second
+5. Wait a few seconds
+6. Move the master arm — the slave will follow
 
-### 2. Choose Master and Slave
+## How It Works
 
-Edit the top of `run_dual_piper.sh`:
+The Piper arms use hardware-level master/slave replication over CAN:
 
-```bash
-MASTER="can0"    # Arm you move by hand
-SLAVE="can1"     # Arm that follows
-```
+- The master arm (`0xFA`) sends joint control frames (CAN IDs `0x155`, `0x156`, `0x157`, `0x159`)
+- The slave arm (`0xFC`) receives these frames and moves to match
+- No software control loop is needed — replication happens at the CAN protocol level
+- `GetArmJointCtrl()` reads the master arm's control data
+- `GetArmJointMsgs()` reads the slave arm's feedback data
 
-Swap the values to reverse which arm leads. The same config is in `reset.sh`:
+## Monitoring
 
-```bash
-LEFT="can0"
-RIGHT="can1"
-```
-
-## Usage
-
-### Full run (reset + mirror)
+To view real-time joint positions of both arms on the shared CAN bus:
 
 ```bash
 bash run_dual_piper.sh
 ```
 
-This resets both arms to zero first, then starts mirroring.
-
-### Reset only (use anytime)
+Or directly:
 
 ```bash
-bash reset.sh              # reset both arms
-bash reset.sh left         # reset left arm only
-bash reset.sh right        # reset right arm only
+python3 dual_piper.py --can can0
 ```
 
-Or directly with Python:
+## Swapping Master and Slave
 
-```bash
-python3 reset_arms.py --left can0 --right can1
-python3 reset_arms.py --left can0                # left only
-python3 reset_arms.py --right can1               # right only
-```
-
-### Mirror only (arms already at zero)
-
-```bash
-python3 dual_piper.py --master can0 --slave can1
-```
-
-### What happens during mirroring
-
-1. Slave arm enables and enters CAN joint control mode
-2. Master arm enters teach mode (motors disabled, free to move by hand)
-3. Joint positions are printed every ~1 second
-4. Press **Ctrl+C** to stop (both arms are disabled safely)
+1. Power off both arms
+2. Connect each arm individually and reconfigure:
+   ```bash
+   python3 reset_arms.py can0 master    # connect new master arm
+   python3 reset_arms.py can0 slave     # connect new slave arm
+   ```
+3. Reconnect both to the same bus, power slave first then master
 
 ## Troubleshooting
 
-### CAN interfaces not found
+**Slave doesn't follow master**
+- Both arms must be on the same CAN bus (same adapter)
+- Power on slave first, then master
+- Check CAN cable connections at both arms and the adapter
+- Try power cycling both arms
 
-Make sure both USB CAN adapters are plugged in. Check what's available:
+**CAN "Message NOT sent" errors**
+- The arm is not powered on or the CAN cable is disconnected
+- Check that the CAN adapter is wired to the arm, not just plugged into USB
 
+**Arm stuck or unresponsive**
 ```bash
-ip -br link show type can
+python3 piper_reset.py can0
 ```
 
-If an interface is down, bring it up manually:
+**Switching from master to slave mode**
+- The arm needs a power cycle after changing its role
 
-```bash
-sudo ip link set can0 type can bitrate 1000000 && sudo ip link set can0 up
-```
+## File Reference
 
-### Arm fails to enable
-
-- Check that the arm is powered on and CAN cables are connected
-- The script waits up to 10 seconds; if it times out, power cycle the arm
-- Try running `piper_sdk/demo/V2/piper_reset.py` for a single arm to clear errors
-- Check control mode with `piper_sdk/demo/V2/piper_status.py`
-
-### Arm doesn't move to zero during reset
-
-- Make sure the arm successfully entered CAN control mode (look for `ctrl_mode: 1` in output)
-- If stuck, press the button on the robot and try `piper_sdk/demo/V2/piper_reset.py` first
-
-### Slave doesn't follow smoothly
-
-- Make sure both CAN adapters are on separate USB ports (not through the same hub)
-- The control loop runs at 200Hz; increase `LOOP_RATE` in `dual_piper.py` if needed
+| File | Purpose |
+|------|---------|
+| `reset.sh` | Interactive setup to configure master/slave roles |
+| `reset_arms.py` | Configure a single arm as master or slave |
+| `run_dual_piper.sh` | Launch the monitoring script |
+| `dual_piper.py` | Monitor master/slave joint positions |
+| `piper_reset.py` | Send reset command to a stuck arm |
+| `setup_can.sh` | Activate the CAN interface |
+| `piper_sdk/` | Piper SDK (standalone copy) |
+| `piper_utils.py` | Shared utility functions |
+| `examples/` | Single-arm example scripts |
