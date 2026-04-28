@@ -158,15 +158,17 @@ def main():
                 piper.MotionCtrl_2(0x01, 0x01, 100, 0xAD)
                 piper.EnableArm(7)
 
-            # Relay master's gripper to slave at ~20Hz. The master/slave CAN
-            # linkage replicates joint frames automatically, but the gripper
-            # module is independently enabled and does NOT auto-follow, so
-            # we read master's gripper command and forward it to slave.
-            if loop_count % 10 == 0:
-                master_grip = piper.GetArmGripperCtrl().gripper_ctrl
-                piper.GripperCtrl(
-                    abs(master_grip.grippers_angle), 1000, 0x01, 0
-                )
+            # Relay master's gripper to slave every loop (~200Hz) so the
+            # slave keeps up with master's speed. The master/slave linkage
+            # replicates joints automatically, but the gripper module is
+            # independently enabled and does NOT auto-follow — we forward
+            # master's gripper command to slave's 0x159 here. Pass through
+            # master's own effort so the slave matches the commanded torque.
+            master_grip = piper.GetArmGripperCtrl().gripper_ctrl
+            grip_effort = master_grip.grippers_effort or 3000
+            piper.GripperCtrl(
+                abs(master_grip.grippers_angle), grip_effort, 0x01, 0
+            )
 
             # Print status every ~2 seconds
             if loop_count % 400 == 0:
